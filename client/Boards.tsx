@@ -34,7 +34,7 @@ function useReducedMotion() {
 export function Board(props: BoardProps) {
   if (props.match.game === 'chess') return <ChessBoard {...props} />;
   if (props.match.game === 'checkers') return <CheckersBoard {...props} />;
-  return <TicTacToeBoard {...props} />;
+  return props.match.game === 'tictactoe' ? <TicTacToeBoard {...props} /> : null;
 }
 function ChessBoard({ match, seat, enabled, play }: BoardProps) {
   const [selected, setSelected] = useState<string | null>(null), [promotion, setPromotion] = useState<ChessMove[]>([]);

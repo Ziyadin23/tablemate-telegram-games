@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -18,16 +18,23 @@ it('migrates an existing v1 database without changing matches, moves, actions, o
     const action = { kind: 'move' as const, actionId: randomUUID(), version: 1, move: { kind: 'chess' as const, from: 'e2', to: 'e4' } };
     old.prepare('INSERT INTO moves VALUES(?,1,?,?,?)').run(id, 'first', 'e4', JSON.stringify(action.move));
     old.prepare('INSERT INTO actions VALUES(?,?,?,?,?)').run(id, action.actionId, 'alice', 'move', JSON.stringify({ kind: 'move', move: action.move }));
-    old.prepare('INSERT INTO message_refs(ref,match_id,inline_message_id) VALUES(?,?,?)').run('inline', id, 'inline'); old.close();
+    old.prepare('INSERT INTO message_refs(ref,match_id,inline_message_id) VALUES(?,?,?)').run('inline', id, 'inline');
+    old.prepare("INSERT INTO matches(id,game,creator_id,status,state,published,created_at,updated_at) VALUES(?,'chess','alice','waiting',?,?,?,?)").run('old-waiting', state, 1, '2026-01-01', '2026-01-01');
+    old.prepare("INSERT INTO matches(id,game,creator_id,status,state,published,created_at,updated_at) VALUES(?,'chess','alice','waiting',?,?,?,?)").run('old-draft', state, 0, '2026-01-01', '2026-01-01');
+    old.close();
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-10-11T12:00:00.000Z'));
     let service = new GameService(openDatabase(path));
-    expect(service.db.pragma('user_version', { simple: true })).toBe(3);
+    expect(service.db.pragma('user_version', { simple: true })).toBe(5);
+    expect(service.get('old-waiting')).toMatchObject({ status: 'waiting', waitingExpiresAt: '2026-10-11T12:03:00.000Z' });
+    expect(service.get('old-draft').waitingExpiresAt).toBeNull(); expect(service.get(id).waitingExpiresAt).toBeNull();
     expect(service.get(id)).toMatchObject({ version: 2, state: JSON.parse(state), history: [{ number: 1, seat: 'first', label: 'e4' }] });
     expect(service.act(id, 'alice', action).history).toHaveLength(1); expect(service.pendingMessages()[0]).toMatchObject({ ref: 'inline', attempts: 0, next_attempt_at: 0 });
     const requestId = randomUUID(), created = service.create('chess', 'alice', true, requestId);
-    service.db.close(); service = new GameService(openDatabase(path));
+    service.db.close(); vi.setSystemTime(new Date('2026-10-11T12:01:00.000Z')); service = new GameService(openDatabase(path));
+    expect(service.get('old-waiting').waitingExpiresAt).toBe('2026-10-11T12:03:00.000Z');
     expect(service.create('chess', 'alice', true, requestId).id).toBe(created.id);
     expect(() => service.create('checkers', 'alice', true, requestId)).toThrow('already used');
     expect(service.creation('alice', requestId).id).toBe(created.id);
     expect(() => service.creation('bob', requestId)).toThrow('not been saved'); service.db.close();
-  } finally { rmSync(dir, { recursive: true, force: true }); }
+  } finally { vi.useRealTimers(); rmSync(dir, { recursive: true, force: true }); }
 });

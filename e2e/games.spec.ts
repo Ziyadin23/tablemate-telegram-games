@@ -3,11 +3,13 @@ import { test, expect, type Browser, type Page } from '@playwright/test';
 async function table(browser: Browser, alice: Page, game: string) {
   await alice.goto('/'); await alice.getByRole('button', { name: `Play ${game}`, exact: true }).click();
   await expect(alice.getByRole('heading', { name: 'Waiting for player' })).toBeVisible();
+  await expect(alice.locator('.waiting-countdown')).toBeVisible();
   const bobContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const bob = await bobContext.newPage(); const url = new URL(alice.url()); url.searchParams.set('player', 'Bob');
   await bob.goto(url.toString());
   await expect(bob.getByRole('button', { name: /join|invit|share/i })).toHaveCount(0);
   await expect(alice.getByRole('heading', { name: 'Your turn', exact: true })).toBeVisible();
+  await expect(alice.locator('.waiting-countdown')).toHaveCount(0);
   return { bob, bobContext };
 }
 

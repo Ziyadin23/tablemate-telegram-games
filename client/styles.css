@@ -4,7 +4,7 @@
 :root[data-theme="light"] { --bg: #f6f7f8; --surface: #fff; --text: #22272b; --muted: #737a82; --accent: #36694c; --accent-ink: #fff; color-scheme: light; }
 * { box-sizing: border-box; }
 body { margin: 0; }
-button, input { font: inherit; }
+button, input, select { font: inherit; }
 button { cursor: pointer; color: inherit; -webkit-tap-highlight-color: transparent; }
 button:disabled { cursor: default; opacity: .45; }
 button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
@@ -23,15 +23,18 @@ h2 { font-size: 16px; font-weight: 600; letter-spacing: -.3px; }
 .connection.connected i { background: #8abd97; }
 .demo-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; font-size: 11px; color: var(--muted); }
 .demo-bar button { padding: 8px 0; background: none; border: 0; color: var(--muted); font-size: 11px; }
+.demo-bar select { padding: 6px 8px; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; font-size: 11px; }
 .games-section { padding-top: 32px; }
 .games-section > h1 { margin-bottom: 22px; }
-.game-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.game-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .game-card { display: flex; align-items: center; gap: 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); padding: 26px 18px; text-align: left; font-size: 14px; font-weight: 500; transition: border-color .15s, background .15s; }
 .game-card:hover:not(:disabled) { border-color: var(--accent); background: color-mix(in srgb, var(--surface) 94%, var(--accent)); }
 .game-icon { width: 44px; height: 50px; display: grid; place-items: center; font: 44px/1 "DejaVu Sans", "Segoe UI Symbol", sans-serif; color: var(--accent); flex-shrink: 0; }
 .game-card.checkers .game-icon { font-size: 31px; }
 .game-card.tictactoe .game-icon { font-size: 48px; }
 .card-arrow { margin-left: auto; color: var(--muted); font-size: 18px; }
+.card-meta { display: block; margin-top: 5px; color: var(--muted); font-size: 10px; font-weight: 400; }
+.game-card.mafia .game-icon { font-size: 34px; }
 .saved-games { margin-top: 38px; }
 .section-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 15px; }
 .filters { display: flex; gap: 4px; }
@@ -54,6 +57,8 @@ h2 { font-size: 16px; font-weight: 600; letter-spacing: -.3px; }
 .turn-status .status-dot { background: var(--muted); }
 .turn-status.your-turn .status-dot { background: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 12%, transparent); }
 .turn-status > p { flex-basis: 100%; color: var(--muted); font-size: 12px; padding-left: 15px; }
+.waiting-countdown { line-height: 1.5; }
+.waiting-countdown span { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 .spectator-label { color: var(--muted); font-size: 10px; border: 1px solid var(--line); border-radius: 5px; padding: 4px 6px; }
 .board-panel { grid-area: board; min-width: 0; }
 .board-player { min-height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 2px 12px; }
@@ -110,6 +115,8 @@ h2 { font-size: 16px; font-weight: 600; letter-spacing: -.3px; }
 .primary { color: var(--accent-ink); background: var(--accent); }
 .secondary { background: transparent; border-color: var(--line); }
 .secondary:hover:not(:disabled) { background: var(--surface); }
+.cancel-game { min-height: 44px; padding: 12px 18px; font-size: 14px; font-weight: 600; color: var(--text); background: var(--surface); border-color: color-mix(in srgb, var(--text) 55%, transparent); }
+.cancel-game:hover:not(:disabled) { background: color-mix(in srgb, var(--surface) 94%, var(--text)); border-color: var(--text); }
 .text-button { padding: 11px 0; min-height: 40px; background: none; border: 0; font-size: 12px; color: var(--muted); }
 .danger { color: #d49387; }
 .draw-offer { border: 1px solid var(--line); padding: 15px; border-radius: 10px; margin: 10px 0; font-size: 12px; }
@@ -146,6 +153,56 @@ h2 { font-size: 16px; font-weight: 600; letter-spacing: -.3px; }
 .boot-screen > p { color: var(--muted); font-size: 13px; line-height: 1.6; max-width: 360px; }
 .loading-ring { width: 24px; height: 24px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+.mafia-layout { display: grid; grid-template-columns: minmax(0, 560px) minmax(0, 1fr); gap: 32px; padding-top: 24px; }
+.mafia-main, .mafia-sidebar { min-width: 0; }
+.mafia-heading { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+.mafia-heading h2 { font-size: 22px; }
+.mafia-heading p { color: var(--muted); font-size: 12px; margin-top: 6px; }
+.mafia-emblem { display: grid; place-items: center; width: 48px; height: 48px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; font-size: 29px; flex-shrink: 0; }
+.mafia-phase-copy { padding: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; margin-bottom: 16px; }
+.mafia-phase-copy p, .mafia-result, .mafia-action-status { font-size: 13px; line-height: 1.6; }
+.mafia-phase-copy > p:first-child { color: var(--muted); }
+.mafia-timer { margin-top: 10px; color: var(--text); }
+.mafia-timer strong { font-variant-numeric: tabular-nums; }
+.mafia-result { margin-bottom: 16px; }
+.mafia-roster { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.mafia-player { display: flex; gap: 10px; align-items: center; padding: 13px; min-height: 64px; text-align: left; border: 1px solid var(--line); border-radius: 10px; background: transparent; min-width: 0; }
+.mafia-player:disabled { opacity: 1; }
+.mafia-player:not(:disabled):hover { background: var(--surface); border-color: var(--accent); }
+.mafia-player.chosen, .mafia-choice .chosen { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+.mafia-player.eliminated { color: var(--muted); background: var(--surface); }
+.mafia-player-copy { display: grid; gap: 5px; min-width: 0; }
+.mafia-player-copy strong { font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+.mafia-player-copy small { color: var(--muted); font-size: 10px; margin-left: 6px; }
+.mafia-player-copy > span { color: var(--muted); font-size: 11px; }
+.mafia-vote-count { margin-left: auto; font-size: 10px; color: var(--accent); white-space: nowrap; }
+.mafia-choice { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
+.mafia-choice > p { font-size: 13px; margin-bottom: 12px; }
+.mafia-choice > div { display: flex; justify-content: flex-end; gap: 10px; }
+.mafia-action-status { color: var(--muted); margin-top: 16px; }
+.mafia-role-card { border: 1px solid var(--line); background: var(--surface); border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+.mafia-role-card > p:first-child { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
+.mafia-role-card h2 { margin: 10px 0; font-size: 24px; color: var(--accent); }
+.mafia-role-card.role-mafia h2 { color: #d49387; }
+:root[data-theme="light"] .mafia-role-card.role-mafia h2 { color: #9c4b40; }
+.mafia-role-card > p { font-size: 12px; line-height: 1.6; }
+.mafia-role-card p + p { margin-top: 12px; }
+.mafia-investigations { margin-bottom: 20px; }
+.mafia-investigations h2 { margin-bottom: 10px; font-size: 14px; }
+.mafia-investigations p { margin-top: 8px; font-size: 12px; line-height: 1.6; }
+.mafia-investigations small { color: var(--muted); }
+.mafia-lobby-actions { display: grid; gap: 12px; }
+.mafia-lobby-actions p { font-size: 12px; color: var(--muted); }
+.mafia-lobby-actions input { min-width: 0; width: 100%; padding: 10px; font-size: 11px; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 8px; }
+.mafia-leave { width: 100%; }
+.mafia-rules { font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); margin-top: 22px; padding-top: 18px; }
+.mafia-rules summary { cursor: pointer; color: var(--text); }
+.mafia-rules p { margin-top: 12px; line-height: 1.7; }
+.mafia-events { margin-top: 24px; border-top: 1px solid var(--line); padding-top: 18px; }
+.mafia-events h2 { font-size: 14px; }
+.mafia-events ol { list-style: none; padding: 0; margin: 12px 0 0; }
+.mafia-events li { display: flex; gap: 12px; font-size: 12px; line-height: 1.6; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.mafia-events li > span { color: var(--muted); white-space: nowrap; }
 @media (max-width: 740px) {
   .app-shell { max-width: 540px; padding-left: max(16px, env(safe-area-inset-left), var(--tg-content-safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right), var(--tg-content-safe-area-inset-right, 0px)); }
   .header { height: 60px; }
@@ -175,6 +232,10 @@ h2 { font-size: 16px; font-weight: 600; letter-spacing: -.3px; }
   .game-actions { justify-content: flex-end; padding: 16px 0; }
   .game-actions:empty { padding: 5px 0; }
   .move-history { margin-top: 0; }
+  .mafia-layout { grid-template-columns: minmax(0, 1fr); gap: 24px; padding-top: 18px; }
+  .mafia-heading h2 { font-size: 19px; }
+  .mafia-player { padding: 12px; }
+  .mafia-role-card { padding: 18px; }
   .picker-dialog, .confirm-dialog { padding: 24px 18px; }
   .picker-dialog .game-card { padding: 18px 10px; }
 }

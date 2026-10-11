@@ -104,6 +104,22 @@ describe('HTTP and websocket integration', () => {
     expect((await changed).match.status).toBe('active'); first.ws.close();
     const second = await open(); expect(second.match.version).toBe(1); second.ws.close();
   });
+  it('automatically disbands waiting games and broadcasts the result without a client action', async () => {
+    const api = await setup(); service.upsertPlayer({ id: 'alice', name: 'Alice' });
+    const match = service.create('chess', 'alice'), address = await api.listen({ host: '127.0.0.1', port: 0 });
+    const ws = new WebSocket(address.replace('http:', 'ws:') + '/ws');
+    try {
+      await new Promise<void>(resolve => ws.once('open', resolve));
+      const ready = waitMessage(ws, 'ready'); ws.send(JSON.stringify({ type: 'auth', token: issueSession('alice', config.sessionSecret) })); await ready;
+      const initial = waitMessage(ws, 'match'); ws.send(JSON.stringify({ type: 'subscribe', matchId: match.id })); await initial;
+      const changed = waitMessage(ws, 'match'), listChanged = waitMessage(ws, 'list-changed');
+      service.db.prepare('UPDATE matches SET waiting_expires_at=? WHERE id=?').run(new Date(Date.now() - 1).toISOString(), match.id);
+      expect((await changed).match).toMatchObject({ status: 'cancelled', version: 1, opponent: null, result: { reason: 'No second player joined in time.' } });
+      await listChanged;
+      const stored = service.db.prepare('SELECT status FROM matches WHERE id=?').get(match.id);
+      expect(stored).toEqual({ status: 'cancelled' });
+    } finally { ws.close(); }
+  });
   it('does not allow unauthenticated websocket subscriptions', async () => {
     const api = await setup(), address = await api.listen({ host: '127.0.0.1', port: 0 });
     const ws = new WebSocket(address.replace('http:', 'ws:') + '/ws'); await new Promise<void>(resolve => ws.once('open', resolve));

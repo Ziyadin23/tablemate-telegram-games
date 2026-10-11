@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { WAITING_TIMEOUT_MS } from '../shared/types.js';
 
 export function openDatabase(path: string) {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
@@ -54,6 +55,28 @@ export function openDatabase(path: string) {
   if (Number(db.pragma('user_version', { simple: true })) < 3) db.transaction(() => {
     // Draft cleanup must not scan the entire durable creation ledger per deletion.
     db.exec('CREATE INDEX creations_match ON creations(match_id); PRAGMA user_version = 3;');
+  })();
+  if (Number(db.pragma('user_version', { simple: true })) < 4) db.transaction(() => {
+    db.exec(`
+      ALTER TABLE matches ADD COLUMN waiting_expires_at TEXT;
+      CREATE INDEX matches_waiting_expiry ON matches(waiting_expires_at) WHERE status='waiting' AND opponent_id IS NULL;
+      PRAGMA user_version = 4;
+    `);
+    // Give existing invitations a full joining window when upgrading.
+    db.prepare("UPDATE matches SET waiting_expires_at=? WHERE published=1 AND status='waiting' AND opponent_id IS NULL").run(new Date(Date.now() + WAITING_TIMEOUT_MS).toISOString());
+  })();
+  if (Number(db.pragma('user_version', { simple: true })) < 5) db.transaction(() => {
+    db.exec(`
+      ALTER TABLE matches ADD COLUMN phase_expires_at TEXT;
+      CREATE INDEX matches_mafia_phase ON matches(phase_expires_at) WHERE game='mafia' AND status='active';
+      CREATE TABLE match_members (
+        match_id TEXT NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+        player_id TEXT NOT NULL REFERENCES players(id),
+        PRIMARY KEY(match_id, player_id)
+      );
+      CREATE INDEX match_members_player ON match_members(player_id, match_id);
+      PRAGMA user_version = 5;
+    `);
   })();
   return db;
 }

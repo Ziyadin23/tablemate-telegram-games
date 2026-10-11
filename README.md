@@ -1,6 +1,6 @@
 # Tablemate · Telegram games
 
-Play **chess, English/American checkers, and tic-tac-toe** with a friend from a Telegram chat. Run a command in chat and open the board inside Telegram. The second player joins automatically. Every accepted move is saved; games are untimed and survive closing the app or restarting the server.
+Play **chess, English/American checkers, tic-tac-toe, and Mafia** from a Telegram chat. Board games support two players; Mafia supports groups of 5–10 with secret roles. Run a command in chat and open the game inside Telegram. Progress survives closing the app or restarting the server. Board games are untimed after joining; Mafia uses timed night and day phases.
 
 ## Try it locally
 
@@ -19,7 +19,7 @@ Open **http://localhost:5173**. The demo signs you in as Alice.
 3. Play Alice’s moves in the first tab and Bob’s in the second.
 4. Close and reopen a tab, or visit **Your games**, to resume. The board link always opens the same match.
 
-Demo identities are limited to Alice and Bob and are available only in demo mode. Production refuses to start in demo mode. The demo listens only on the loopback interface. Sessions are independent per tab; switching players does not affect your other tab.
+Demo identities are Alice, Bob, Carol, Dave, Eve, Frank, Grace, Heidi, Ivan, and Judy, available only in demo mode. To try Mafia, open the same lobby URL in five separate tabs using `&player=Alice`, `&player=Bob`, `&player=Carol`, `&player=Dave`, and `&player=Eve`. The host clicks **Start Mafia**. A Mafia demo also has a player selector. Production refuses to start in demo mode. The demo listens only on the loopback interface. Sessions are independent per tab; switching players does not affect your other tab.
 
 ## Connect a Telegram bot
 
@@ -33,9 +33,10 @@ Demo identities are limited to Alice and Bob and are available only in demo mode
 People can now:
 
 - Type `@your_bot_username` in **any private chat or group**, choose a game, and send its Play button. The bot does not need to be a group member for this flow.
-- Add the bot to a group and use `/play`, `/play chess`, `/play checkers`, or `/play tictactoe`.
+- Add the bot to a group and use `/play`, `/play chess`, `/play checkers`, `/play tictactoe`, or `/play mafia`.
 - Use `/play` in their private conversation with the bot, then forward its game message to a friend.
 - Open the board to play. The first distinct person to open it joins the second seat automatically. The creator plays White in chess, Red in checkers, and X in tic-tac-toe. Other visitors spectate.
+- Open a Mafia invitation to join its group lobby. The host can start with 5–10 players. Discuss during the day in the Telegram chat; each participant uses their own Mini App for private roles and night actions. Late visitors spectate.
 
 Board links are access links: anyone opening one takes the empty opponent seat or watches if both players are already seated. They are not restricted to a particular chat. Direct-link Mini Apps cannot read ordinary chat messages.
 
@@ -107,7 +108,7 @@ address. No Caddy service or purchased domain is needed on Render.
 - SQLite stores player names/IDs, game states, full move history, action IDs, and game-message references. The bot token stays on the server.
 - Keep the `games` volume across deployments. `docker compose down` preserves it; `docker compose down -v` deletes saved games.
 - For a consistent offline backup, stop the app, copy the database together with any `-wal`/`-shm` files from the volume, then start the app. Restore only while the app is stopped.
-- Numbered, additive database migrations run at startup. The current schema is version 3. Version-1 databases upgrade without changing saved game states. Migration 2 adds creation/retry ledgers; migration 3 indexes the creation ledger's match reference for draft cleanup.
+- Numbered, additive database migrations run at startup. The current schema is version 5. Version-1 databases upgrade without changing saved game states. Migration 2 adds creation/retry ledgers; migration 3 indexes the creation ledger's match reference for draft cleanup; migration 4 persists and indexes waiting-game deadlines; migration 5 adds group membership and Mafia phase deadlines. Existing waiting invitations receive a fresh three-minute window when upgrading to migration 4.
 - Unsent inline-query drafts expire after 24 hours. Published games and active games do not expire. **Your games** shows the most recent 100 matches.
 - Telegram message edits use persistent due times and exponential backoff independently of gameplay. Flood-control cooldowns survive restart; shutdown drains outstanding edits before closing SQLite. Deleted or inaccessible game messages do not delete matches.
 - Launch-data signatures expire after ten minutes for new authentication; signed app sessions last 24 hours. The client restores a server-validated session within the same browser tab and exact Telegram launch (or demo identity), using sessionStorage. New launches authenticate afresh. Reopen the Mini App from Telegram if authentication or the app session expires.
@@ -119,7 +120,8 @@ address. No Caddy service or purchased domain is needed on Render.
 - **Chess:** standard legal moves, castling, en passant, selectable promotion, checkmate, stalemate, insufficient material, repetition, and the fifty-move rule, using [chess.js](https://jhlywa.github.io/chess.js/). Full move history is retained and reconstructed when applying a move or evaluating repetition/fifty-move outcomes; lobby summaries and board legal-move reads do not replay it. For casual play, eligible repetition and fifty-move draws end automatically rather than requiring a tournament claim.
 - **Checkers:** 8×8 English/American rules. Men move and capture forward. Kings move one square and capture in either direction. Captures and complete multi-jumps are mandatory, but the player may choose any capture chain. Crowning ends the turn. No legal moves means a loss. Threefold repetition or 40 moves by **each** player with no capture or movement of an uncrowned piece ends automatically in a draw. Based on [WCDF rules](https://wcdf.net/rules/rules_of_checkers_english.pdf).
 - **Tic-tac-toe:** 3×3, X starts, three in a row wins, and a full board without a winner is a draw.
-- Players can resign. Chess/checkers also allow agreed draws. A waiting game can be cancelled by its creator. Closing the app does not resign or cancel a match.
+- **Mafia:** this app's group variant uses 5–10 players, one Mafia member for 5–6 players or two for 7–10, one Doctor, one Detective, and remaining Villagers. Roles are randomly assigned on the server. Mafia choose a town target each night; a tied Mafia vote eliminates nobody. The Doctor protects one player, including themselves. The Detective privately learns a target's team. During the day, living players vote publicly; the unique most-voted choice wins, with tied votes or a winning skip eliminating nobody. Eliminated roles are revealed. Town win by eliminating every Mafia member; Mafia win at parity with the town. Nights last up to 60 seconds and days up to 120 seconds, ending early when all required choices are saved. Missing choices count as skips. Leaving an active game counts as elimination. Private roles, teammate identities, investigations, and night choices are filtered separately for each authenticated HTTP/WebSocket viewer; lobby summaries and Telegram messages remain public.
+- Players can resign. Chess/checkers also allow agreed draws. A waiting game can be cancelled by its creator. Board games automatically disband if a second player does not join within **3 minutes** of publication. Mafia lobbies use the same three-minute window: they start automatically with at least five players, otherwise disband. The screen shows a countdown; reopening does not reset it, and deadlines survive server restarts. Unsent inline drafts start their timer when published. Closing the app does not resign or manually cancel a match.
 
 ## Development and checks
 
@@ -154,14 +156,14 @@ All match endpoints require `Authorization: Bearer <session-token>`.
 | `POST /api/matches` | Create `{ game, requestId }`; UUID request IDs deduplicate creation per player |
 | `GET /api/creations/:requestId` | Recover the committed snapshot for your creation request |
 | `GET /api/matches/:id` | Fetch a saved snapshot |
-| `POST /api/matches/:id/open` | Publish a game, automatically take an empty opponent seat, and return its snapshot |
-| `POST /api/matches/:id/actions` | Join, move, resign, cancel, or offer/accept/decline a draw |
+| `POST /api/matches/:id/open` | Publish a game, automatically take an empty opponent seat or join a Mafia lobby, and return the caller's snapshot |
+| `POST /api/matches/:id/actions` | Join, move, resign, cancel, offer/accept/decline a draw, or start/leave a Mafia lobby |
 
 The current client always sends a creation `requestId` and reuses it after ambiguous failures. Omitting it remains supported for older clients, which cannot recover lost creation responses idempotently. Changing the game with an existing request ID returns **409**.
 
 Actions contain `{ actionId, version, kind, move? }`. `actionId` is unique per attempted action and must be reused for retries. `version` is the version of the snapshot the action was based on. A stale action returns **409**; the client reloads the latest snapshot. Repeating an already committed action returns the latest match without committing it again.
 
-Move formats are `{ kind: "chess", from, to, promotion? }`, `{ kind: "checkers", path: [squareIndex, ...] }` (a complete capture sequence), and `{ kind: "tictactoe", cell }`. Checkers indices run 0–63 from the top-left of the canonical board; tic-tac-toe cells run 0–8 in row-major order.
+Move formats are `{ kind: "chess", from, to, promotion? }`, `{ kind: "checkers", path: [squareIndex, ...] }` (a complete capture sequence), `{ kind: "tictactoe", cell }`, and `{ kind: "mafia", phase: "night" | "day", round, target: playerId | null }` (null skips). Checkers indices run 0–63 from the top-left of the canonical board; tic-tac-toe cells run 0–8 in row-major order. Mafia validates the phase/round and one choice per living participant instead of requiring a shared version, so simultaneous choices do not reject each other. Action-ID deduplication still applies.
 
 WebSocket `/ws` requires `{ type: "auth", token }` as its first message. After `ready`, send `{ type: "subscribe", matchId }`; use `matchId: null` to unsubscribe in the lobby. Board navigation reuses the authenticated socket. The server sends `{ type: "match", match }` for the initial/current state and accepted changes, and `list-changed` when one of your games changes. Reconnect and subscribe again to get the saved position. Tokens are never placed in WebSocket URLs.
 
@@ -171,7 +173,7 @@ After connecting a bot and HTTPS hosting:
 
 1. Send an inline game in a human-to-human private chat. Open it from two Telegram accounts and play a turn each; the second account joins automatically.
 2. Repeat in a group without adding the bot, then add it and test `/play@your_bot_username` and a game selector button.
-3. Test all three games, promotion, a mandatory checkers capture, resignation, and a draw offer.
+3. Test all four games, promotion, a mandatory checkers capture, resignation, a draw offer, and Mafia with at least five separate Telegram users. Check that roles and Detective results remain private.
 4. Close/reopen both clients, interrupt one client’s connection, and restart the backend. Confirm the saved position returns.
 5. Check Android/iOS and desktop layouts, Telegram light/dark themes, and a third account’s read-only spectator view.
 6. Confirm game messages change when the match starts/ends and that removed bot permissions do not interrupt an existing board.

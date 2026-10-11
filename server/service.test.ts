@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,7 +9,7 @@ import type { GameSnapshot } from '../shared/types.js';
 
 let service: GameService;
 beforeEach(() => { service = new GameService(openDatabase(':memory:')); for (const id of ['alice', 'bob', 'eve']) service.upsertPlayer({ id, name: id }); });
-afterEach(() => service.db.close());
+afterEach(() => { service.db.close(); vi.useRealTimers(); });
 const action = (m: GameSnapshot, kind: 'join' | 'resign' | 'cancel' | 'offer-draw' | 'accept-draw' | 'decline-draw') => ({ kind, version: m.version, actionId: randomUUID() });
 const started = (game: 'chess' | 'checkers' | 'tictactoe' = 'tictactoe') => { const m = service.create(game, 'alice'); return service.act(m.id, 'bob', action(m, 'join')); };
 
@@ -103,5 +103,77 @@ describe('saved match lifecycle', () => {
       m = saved.act(m.id, 'alice', request); saved.db.close(); saved = new GameService(openDatabase(path));
       expect(saved.get(m.id)).toEqual(m); expect(saved.act(m.id, 'alice', request).history).toHaveLength(1); saved.db.close();
     } finally { rmSync(dir, { recursive: true }); }
+  });
+});
+
+describe('waiting game deadlines', () => {
+  const start = Date.parse('2026-10-11T12:00:00.000Z');
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(start); });
+  it.each(['chess', 'checkers', 'tictactoe'] as const)('disbands an unjoined %s game at three minutes and notifies observers once', game => {
+    const requestId = randomUUID(), waiting = service.create(game, 'alice', true, requestId);
+    expect(waiting.waitingExpiresAt).toBe(new Date(start + 180_000).toISOString());
+    service.addMessageRef(waiting.id, { inlineMessageId: 'waiting' }); service.messageUpdated('waiting');
+    const changes: GameSnapshot[] = []; service.onChange(match => changes.push(match));
+    vi.setSystemTime(start + 179_999);
+    expect(service.expireWaitingGames()).toBe(0); expect(service.get(waiting.id).status).toBe('waiting');
+    vi.setSystemTime(start + 180_000);
+    expect(service.expireWaitingGames()).toBe(1);
+    const expired = service.get(waiting.id);
+    expect(expired).toMatchObject({ status: 'cancelled', version: 1, opponent: null, waitingExpiresAt: null, legalMoves: [], history: [], result: { winner: null, reason: 'No second player joined in time.' } });
+    expect(service.list('alice')[0]).toMatchObject({ status: 'cancelled', version: 1 });
+    expect(service.pendingMessages()[0].ref).toBe('waiting');
+    expect(service.expireWaitingGames()).toBe(0); expect(changes).toEqual([expired]);
+    expect(service.create(game, 'alice', true, requestId)).toEqual(expired);
+  });
+  it.each(['open', 'join'] as const)('rejects a late opponent through %s even before the expiry worker runs', method => {
+    const waiting = service.create('chess', 'alice');
+    vi.setSystemTime(start + 180_000);
+    if (method === 'open') expect(service.open(waiting.id, 'bob').status).toBe('cancelled');
+    else expect(() => service.act(waiting.id, 'bob', action(waiting, 'join'))).toThrow('game changed');
+    const expired = service.get(waiting.id);
+    expect(expired).toMatchObject({ status: 'cancelled', opponent: null, version: 1 });
+    expect(() => service.act(waiting.id, 'bob', action(expired, 'join'))).toThrow('game has ended');
+    expect(service.open(waiting.id, 'eve')).toEqual(expired);
+  });
+  it.each(['open', 'join'] as const)('keeps a game active when its opponent arrives just before expiry through %s', method => {
+    const waiting = service.create('checkers', 'alice');
+    vi.setSystemTime(start + 179_999);
+    const active = method === 'open' ? service.open(waiting.id, 'bob') : service.act(waiting.id, 'bob', action(waiting, 'join'));
+    expect(active).toMatchObject({ status: 'active', waitingExpiresAt: null, opponent: { id: 'bob' } });
+    vi.setSystemTime(start + 600_000);
+    expect(service.expireWaitingGames()).toBe(0); expect(service.get(waiting.id)).toEqual(active);
+  });
+  it('starts drafts on publication and never extends the deadline when reopening or publishing again', () => {
+    const draft = service.create('chess', 'alice', false);
+    expect(draft.waitingExpiresAt).toBeNull();
+    vi.setSystemTime(start + 600_000); expect(service.expireWaitingGames()).toBe(0);
+    const published = service.publish(draft.id);
+    expect(published.waitingExpiresAt).toBe(new Date(start + 780_000).toISOString());
+    vi.setSystemTime(start + 660_000);
+    expect(service.open(draft.id, 'alice').waitingExpiresAt).toBe(published.waitingExpiresAt);
+    expect(service.publish(draft.id).waitingExpiresAt).toBe(published.waitingExpiresAt);
+    const openedDraft = service.create('tictactoe', 'alice', false);
+    expect(service.open(openedDraft.id, 'alice').waitingExpiresAt).toBe(new Date(start + 840_000).toISOString());
+  });
+  it('preserves manual cancellation and finished games after the waiting window', () => {
+    const waiting = service.create('chess', 'alice');
+    const cancelled = service.act(waiting.id, 'alice', action(waiting, 'cancel'));
+    const active = started('chess'), finished = service.act(active.id, 'bob', action(active, 'resign'));
+    vi.setSystemTime(start + 600_000);
+    expect(service.expireWaitingGames()).toBe(0);
+    expect(service.get(waiting.id)).toEqual(cancelled); expect(cancelled.result).toBeNull();
+    expect(service.get(finished.id)).toEqual(finished);
+  });
+  it('preserves the original deadline across database restarts and expires after downtime', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tablemate-expiry-')), path = join(dir, 'games.sqlite');
+    let saved = new GameService(openDatabase(path));
+    try {
+      saved.upsertPlayer({ id: 'alice', name: 'Alice' });
+      const waiting = saved.create('tictactoe', 'alice'); saved.db.close();
+      vi.setSystemTime(start + 120_000); saved = new GameService(openDatabase(path));
+      expect(saved.get(waiting.id)).toEqual(waiting); saved.db.close();
+      vi.setSystemTime(start + 180_000); saved = new GameService(openDatabase(path));
+      expect(saved.get(waiting.id)).toMatchObject({ status: 'cancelled', version: 1, opponent: null });
+    } finally { if (saved.db.open) saved.db.close(); rmSync(dir, { recursive: true, force: true }); }
   });
 });

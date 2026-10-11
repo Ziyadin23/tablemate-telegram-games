@@ -1,5 +1,5 @@
 import { Chess, type Square } from 'chess.js';
-import { otherSeat, type GameEngine, type GameState, type CheckersState, type CheckerPiece, type CheckersMove, type TicTacToeState, type GameType, type Move, type Seat } from '../shared/types.js';
+import { otherSeat, type GameEngine, type GameState, type CheckersState, type CheckerPiece, type CheckersMove, type TicTacToeState, type BoardGameType, type Move, type Seat } from '../shared/types.js';
 
 const chessHistory = new WeakMap<GameState, Chess>();
 function chess(state: GameState) {
@@ -147,5 +147,5 @@ const ticTacToeEngine: GameEngine = {
   },
 };
 
-export const engines: Record<GameType, GameEngine> = { chess: chessEngine, checkers: checkersEngine, tictactoe: ticTacToeEngine };
+export const engines: Record<BoardGameType, GameEngine> = { chess: chessEngine, checkers: checkersEngine, tictactoe: ticTacToeEngine };
 export const sameMove = (a: Move, b: Move): boolean => a.kind === b.kind && (a.kind === 'chess' && b.kind === 'chess' ? a.from === b.from && a.to === b.to && a.promotion === b.promotion : a.kind === 'checkers' && b.kind === 'checkers' ? JSON.stringify(a.path) === JSON.stringify(b.path) : a.kind === 'tictactoe' && b.kind === 'tictactoe' && a.cell === b.cell);

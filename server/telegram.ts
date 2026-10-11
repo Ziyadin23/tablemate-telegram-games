@@ -1,30 +1,31 @@
 import { Bot, InlineKeyboard, GrammyError, type Context } from 'grammy';
 import type { InlineQueryResultArticle } from 'grammy/types';
-import { gameNames, type GameSummary, type GameType } from '../shared/types.js';
+import { gameNames, gameResultLabel, MAFIA_MIN_PLAYERS, MAFIA_MAX_PLAYERS, type GameSummary, type GameType } from '../shared/types.js';
 import type { Config } from './config.js';
 import { GameService } from './service.js';
 
 export const gameMessage = (match: GameSummary) => {
   const title = gameNames[match.game];
+  if (match.game === 'mafia' && match.status === 'waiting') return `${title}\n${match.creator.name} · ${match.participants?.length ?? 1}/${MAFIA_MAX_PLAYERS} players\n${MAFIA_MIN_PLAYERS} needed to start · Lobby closes after 3 minutes`;
   if (match.status === 'waiting') return `${title}\n${match.creator.name} · Waiting for player`;
-  if (match.status === 'cancelled') return `${title}\nCancelled`;
+  if (match.status === 'cancelled') return `${title}\n${match.result ? `Disbanded · ${match.result.reason}` : 'Cancelled'}`;
   if (match.status === 'finished') {
-    const winner = match.result?.winner === 'first' ? match.creator.name : match.opponent?.name;
-    return `${title}\n${match.result?.winner ? `${winner} won` : 'Draw'} · ${match.result?.reason}`;
+    return `${title}\n${gameResultLabel(match)} · ${match.result?.reason}`;
   }
+  if (match.game === 'mafia') return `${title}\n${match.mafiaPhase === 'night' ? 'Night' : 'Day'} · ${match.participants?.length ?? 0} players\nOpen the game for your private role and actions.`;
   return `${title}\n${match.creator.name} vs ${match.opponent?.name}`;
 };
 export const gameLink = (botUsername: string, id: string) => `https://t.me/${botUsername}?startapp=${id}`;
 export const resultArticle = (match: GameSummary, botUsername: string): InlineQueryResultArticle => ({
-  type: 'article', id: match.id, title: gameNames[match.game], description: '2 players',
+  type: 'article', id: match.id, title: gameNames[match.game], description: match.game === 'mafia' ? `${MAFIA_MIN_PLAYERS}–${MAFIA_MAX_PLAYERS} players · Secret roles` : '2 players',
   input_message_content: { message_text: gameMessage(match) },
   reply_markup: new InlineKeyboard().url(`Play ${gameNames[match.game]}`, gameLink(botUsername, match.id)),
 });
 
 export function createTelegramBot(config: Config, service: GameService) {
   const bot = new Bot(config.botToken);
-  const keyboard = () => new InlineKeyboard().text('♟ Chess', 'new:chess').text('● Checkers', 'new:checkers').row().text('✕ Tic-tac-toe', 'new:tictactoe');
-  const games: GameType[] = ['chess', 'checkers', 'tictactoe'];
+  const keyboard = () => new InlineKeyboard().text('♟ Chess', 'new:chess').text('● Checkers', 'new:checkers').row().text('✕ Tic-tac-toe', 'new:tictactoe').text('🎭 Mafia', 'new:mafia');
+  const games: GameType[] = ['chess', 'checkers', 'tictactoe', 'mafia'];
   const addPlayer = (user: { id: number; first_name: string; last_name?: string; username?: string }) => {
     const player = { id: String(user.id), name: [user.first_name, user.last_name].filter(Boolean).join(' '), ...(user.username ? { username: user.username } : {}) };
     service.upsertPlayer(player); return player;
@@ -47,13 +48,13 @@ export function createTelegramBot(config: Config, service: GameService) {
     addPlayer(ctx.from);
     await ctx.reply('Choose a game.', { reply_markup: keyboard() });
   });
-  bot.command('help', ctx => ctx.reply(`/play chess\n/play checkers\n/play tictactoe\n\nTap Play to open the board. The second player to open it joins automatically.\n\nIn any chat: @${config.botUsername} chess`));
+  bot.command('help', ctx => ctx.reply(`/play chess\n/play checkers\n/play tictactoe\n/play mafia\n\nTap Play to open a game. Board games start when the second player joins. Mafia needs 5–10 players; the host starts it from the lobby.\n\nIn any chat: @${config.botUsername} mafia`));
   bot.command('play', async ctx => {
     const game = ctx.match.trim().toLowerCase();
     if (games.includes(game as GameType)) return sendGame(ctx, game as GameType);
     await ctx.reply('Choose a game.', { reply_markup: keyboard(), ...(ctx.msg.message_thread_id ? { message_thread_id: ctx.msg.message_thread_id } : {}) });
   });
-  bot.callbackQuery(/^new:(chess|checkers|tictactoe)$/, async ctx => {
+  bot.callbackQuery(/^new:(chess|checkers|tictactoe|mafia)$/, async ctx => {
     await ctx.answerCallbackQuery();
     await sendGame(ctx, ctx.match[1] as GameType);
   });

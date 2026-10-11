@@ -8,16 +8,17 @@ import type { WebSocket } from 'ws';
 import { AppError, issueSession, validateTelegramData, verifySession } from './auth.js';
 import { GameService, type Action } from './service.js';
 import type { Config } from './config.js';
-import type { GameSnapshot } from '../shared/types.js';
+import { DEMO_PLAYERS, type GameSnapshot } from '../shared/types.js';
 
-const gameSchema = z.enum(['chess', 'checkers', 'tictactoe']);
+const gameSchema = z.enum(['chess', 'checkers', 'tictactoe', 'mafia']);
 const matchIdSchema = z.string().regex(/^[A-Za-z0-9_-]{16}$/);
 const moveSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('chess'), from: z.string().regex(/^[a-h][1-8]$/), to: z.string().regex(/^[a-h][1-8]$/), promotion: z.enum(['q', 'r', 'b', 'n']).optional() }).strict(),
   z.object({ kind: z.literal('checkers'), path: z.array(z.number().int().min(0).max(63)).min(2).max(13) }).strict(),
   z.object({ kind: z.literal('tictactoe'), cell: z.number().int().min(0).max(8) }).strict(),
+  z.object({ kind: z.literal('mafia'), phase: z.enum(['night', 'day']), round: z.number().int().min(1), target: z.string().min(1).max(100).nullable() }).strict(),
 ]);
-const actionSchema = z.object({ actionId: z.string().min(8).max(100), version: z.number().int().nonnegative(), kind: z.enum(['join', 'move', 'resign', 'cancel', 'offer-draw', 'accept-draw', 'decline-draw']), move: moveSchema.optional() }).strict().refine(a => a.kind === 'move' ? Boolean(a.move) : !a.move, 'Invalid move payload');
+const actionSchema = z.object({ actionId: z.string().min(8).max(100), version: z.number().int().nonnegative(), kind: z.enum(['join', 'start', 'leave', 'move', 'resign', 'cancel', 'offer-draw', 'accept-draw', 'decline-draw']), move: moveSchema.optional() }).strict().refine(a => a.kind === 'move' ? Boolean(a.move) : !a.move, 'Invalid move payload');
 
 export async function buildApp(config: Config, service: GameService, logging = true) {
   const app = Fastify({ logger: logging ? { redact: ['req.headers.authorization', 'req.body.initData', 'req.body.token'] } : false, bodyLimit: 16_384, trustProxy: ['127.0.0.0/8', '::1/128', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'] });
@@ -67,7 +68,7 @@ export async function buildApp(config: Config, service: GameService, logging = t
   });
   app.post('/api/auth/demo', async req => {
     if (config.mode !== 'demo' || config.production) throw new AppError(404, 'Demo authentication is disabled');
-    const { player: name } = z.object({ player: z.enum(['Alice', 'Bob']) }).parse(req.body);
+    const { player: name } = z.object({ player: z.enum(DEMO_PLAYERS) }).parse(req.body);
     const player = { id: `demo-${name.toLowerCase()}`, name }; service.upsertPlayer(player);
     return { token: issueSession(player.id, config.sessionSecret), player };
   });
@@ -83,8 +84,8 @@ export async function buildApp(config: Config, service: GameService, logging = t
     return { match: service.create(game, id, true, requestId) };
   });
   app.get('/api/matches/:id', async req => {
-    currentPlayer(req.headers.authorization); const { id } = z.object({ id: matchIdSchema }).parse(req.params);
-    return { match: service.get(id) };
+    const playerId = currentPlayer(req.headers.authorization), { id } = z.object({ id: matchIdSchema }).parse(req.params);
+    return { match: service.get(id, playerId) };
   });
   app.post('/api/matches/:id/open', async req => {
     const playerId = currentPlayer(req.headers.authorization), { id } = z.object({ id: matchIdSchema }).parse(req.params);
@@ -118,7 +119,7 @@ export async function buildApp(config: Config, service: GameService, logging = t
           if (input.type === 'subscribe') {
             const id = matchIdSchema.nullable().parse(input.matchId);
             entry.matchId = id;
-            if (id) socket.send(JSON.stringify({ type: 'match', match: service.get(id) }));
+            if (id) socket.send(JSON.stringify({ type: 'match', match: service.get(id, entry.playerId) }));
           } else if (input.type === 'ping') socket.send(JSON.stringify({ type: 'pong' }));
           else throw new AppError(400, 'Unknown message');
         }
@@ -135,16 +136,22 @@ export async function buildApp(config: Config, service: GameService, logging = t
       if (socket.readyState !== 1) continue;
       try { verifySession(entry.token, config.sessionSecret); }
       catch { socket.close(1008, 'Session expired'); continue; }
-      if (entry.matchId === match.id) socket.send(JSON.stringify({ type: 'match', match }));
-      if (entry.playerId === match.creator.id || entry.playerId === match.opponent?.id) socket.send(JSON.stringify({ type: 'list-changed' }));
+      if (entry.matchId === match.id) socket.send(JSON.stringify({ type: 'match', match: match.game === 'mafia' ? service.get(match.id, entry.playerId) : match }));
+      if (entry.playerId === match.creator.id || entry.playerId === match.opponent?.id || match.participants?.some(player => player.id === entry.playerId)) socket.send(JSON.stringify({ type: 'list-changed' }));
     }
   });
+  service.expireWaitingGames();
+  service.advanceMafiaGames();
+  const waitingExpiry = setInterval(() => {
+    try { service.expireWaitingGames(); service.advanceMafiaGames(); }
+    catch (error) { app.log.error(error, 'Waiting game expiry failed'); }
+  }, 1000); waitingExpiry.unref();
   const maintenance = setInterval(() => {
     const now = Date.now(); for (const [key, value] of rate) if (value.until < now) rate.delete(key);
     for (const [socket] of sockets) if (socket.readyState === 1) socket.ping();
     service.clearOldDrafts();
   }, 60_000); maintenance.unref();
-  app.addHook('onClose', async () => { unsubscribe(); clearInterval(maintenance); for (const [socket] of sockets) socket.close(1001, 'Server closing'); });
+  app.addHook('onClose', async () => { unsubscribe(); clearInterval(waitingExpiry); clearInterval(maintenance); for (const [socket] of sockets) socket.close(1001, 'Server closing'); });
   const root = resolve('dist/public');
   if (existsSync(root)) {
     await app.register(staticFiles, { root });

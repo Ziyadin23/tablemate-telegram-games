@@ -22,10 +22,11 @@ beforeEach(async () => {
 afterEach(async () => { await telegram.close(); service.db.close(); });
 
 describe('Telegram update integration without network messages', () => {
-  it('returns three personal, uncached games and records chosen feedback', async () => {
+  it('returns four personal, uncached games and records chosen feedback', async () => {
     await telegram.bot.handleUpdate({ update_id: 1, inline_query: { id: 'query1', from: user, query: '', offset: '' } });
     const answer = calls.find(c => c.method === 'answerInlineQuery')!.payload;
-    expect(answer.cache_time).toBe(0); expect(answer.is_personal).toBe(true); expect(answer.results).toHaveLength(3);
+    expect(answer.cache_time).toBe(0); expect(answer.is_personal).toBe(true); expect(answer.results).toHaveLength(4);
+    expect(answer.results[3].title).toBe('Mafia'); expect(answer.results[3].description).toBe('5–10 players · Secret roles');
     expect(answer.results[0].reply_markup.inline_keyboard[0][0].url).toMatch(/^https:\/\/t.me\/tablemate_bot\?startapp=/);
     expect(answer.results[0].reply_markup.inline_keyboard[0][0].text).toBe('Play Chess');
     expect(answer.results[0].input_message_content.message_text).toBe('Chess\nAda · Waiting for player');
@@ -54,5 +55,17 @@ describe('Telegram update integration without network messages', () => {
     }
     expect(service.list('7')).toHaveLength(1); expect(service.list('7')[0].game).toBe('chess');
     expect(calls.filter(c => c.method === 'editMessageText')).toHaveLength(1);
+  });
+  it('updates a game invitation to explain automatic disbanding', async () => {
+    await telegram.bot.handleUpdate({ update_id: 20, message: { message_id: 1, date: 0, from: user, chat: { id: -100, type: 'group', title: 'Friends' }, text: '/play chess', entities: [{ type: 'bot_command', offset: 0, length: 5 }] } });
+    const waiting = service.list('7')[0]; await telegram.flush(); calls = [];
+    service.expireWaitingGames(Date.parse(waiting.waitingExpiresAt!)); await telegram.flush();
+    expect(calls.find(c => c.method === 'editMessageText')!.payload.text).toBe('Chess\nDisbanded · No second player joined in time.');
+  });
+  it('creates a group Mafia lobby from /play mafia', async () => {
+    await telegram.bot.handleUpdate({ update_id: 21, message: { message_id: 1, date: 0, from: user, chat: { id: -100, type: 'group', title: 'Friends' }, text: '/play mafia', entities: [{ type: 'bot_command', offset: 0, length: 5 }] } });
+    const sent = calls.find(c => c.method === 'sendMessage')!.payload;
+    expect(sent.text).toContain('Mafia\nAda · 1/10 players'); expect(sent.text).toContain('5 needed to start');
+    expect(service.list('7')[0]).toMatchObject({ game: 'mafia', participants: [{ id: '7' }] });
   });
 });
