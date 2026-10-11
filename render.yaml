@@ -1,0 +1,25 @@
+# Free preview hosting: SQLite is temporary and resets when Render restarts.
+services:
+  - type: web
+    name: tablemate-telegram-games
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeployTrigger: off
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: APP_MODE
+        value: telegram
+      - key: PORT
+        value: 10000
+      - key: DB_PATH
+        value: /app/data/games.sqlite
+      - key: BOT_TOKEN
+        sync: false
+      - key: BOT_USERNAME
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
